@@ -3,8 +3,8 @@ package platform
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
-	// "time"
 
 	"cloud.google.com/go/iam"
 	"cloud.google.com/go/storage"
@@ -45,6 +45,7 @@ func includesAllUsers(members []string) bool {
 	return false
 }
 
+// checks to see if correct IAM roles are already set up
 func areObjectsPublic(
 	c context.Context,
 	client *storage.Client,
@@ -62,6 +63,47 @@ func areObjectsPublic(
 	}
 
 	return false, nil
+}
+
+// TODO: handle dynamic build paths
+func uploadFiles(
+	c context.Context,
+	client *storage.Client,
+	bucketName string,
+	subPath string,
+	errors *[]string,
+) []string {
+	files, err := os.ReadDir("./build/" + subPath)
+	if err != nil {
+		*errors = append(*errors, err.Error())
+	}
+
+	for _, file := range files {
+		if file.IsDir() {
+			uploadFiles(c, client, bucketName, subPath+file.Name()+"/", errors)
+			continue
+		}
+
+		f, err := os.Open("./build/" + subPath + file.Name())
+		if err != nil {
+			*errors = append(*errors, err.Error())
+			continue
+		}
+		defer f.Close()
+
+		wc := client.Bucket(bucketName).Object(subPath + file.Name()).NewWriter(c)
+		if _, err = io.Copy(wc, f); err != nil {
+			*errors = append(*errors, err.Error())
+			continue
+		}
+
+		if err := wc.Close(); err != nil {
+			*errors = append(*errors, err.Error())
+			continue
+		}
+	}
+
+	return *errors
 }
 
 type DeployConfig struct {
@@ -200,7 +242,18 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 
 	u.Update("Uploading static files...")
 
-	// TODO
+	fileErrors := []string{}
+	uploadFiles(ctx, client, p.config.Bucket, "", &fileErrors)
 
-	return &Deployment{}, nil
+	if len(fileErrors) > 0 {
+		u.Step(terminal.StatusWarn, "Some static files failed to upload")
+	}
+
+	u.Step(terminal.StatusOK, "Upload of static files complete")
+
+	return &Deployment{
+		Bucket: p.config.Bucket,
+		Region: p.config.Region,
+		Project: p.config.Project,
+	}, nil
 }
