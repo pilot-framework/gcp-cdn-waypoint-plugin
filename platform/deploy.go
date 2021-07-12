@@ -6,15 +6,71 @@ import (
 	"os"
 	// "time"
 
+	"cloud.google.com/go/iam"
 	"cloud.google.com/go/storage"
+	iampb "google.golang.org/genproto/googleapis/iam/v1"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
 )
+
+func setPublicIAM(
+	c context.Context,
+	client *storage.Client,
+	bucketName string,
+) (bool, error) {
+	policy, err := client.Bucket(bucketName).IAM().V3().Policy(c)
+	if err != nil {
+		return false, err
+	}
+
+	role := "roles/storage.objectViewer"
+	policy.Bindings = append(policy.Bindings, &iampb.Binding{
+		Role: role,
+		Members: []string{iam.AllUsers},
+	})
+
+	if err := client.Bucket(bucketName).IAM().V3().SetPolicy(c, policy); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func includesAllUsers(members []string) bool {
+	for _, member := range members {
+		if member == iam.AllUsers {
+			return true
+		}
+	}
+
+	return false
+}
+
+func areObjectsPublic(
+	c context.Context,
+	client *storage.Client,
+	bucketName string,
+) (bool, error) {
+	policy, err := client.Bucket(bucketName).IAM().V3().Policy(c)
+	if err != nil {
+		return false, err
+	}
+
+	for _, binding := range policy.Bindings {
+		if binding.Role == "roles/storage.objectViewer" && includesAllUsers(binding.Members) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
 
 type DeployConfig struct {
 	Bucket string `hcl:"bucket"`
 	Project string `hcl:"project"`
 	Region string `hcl:"region,optional"`
 	Directory string `hcl:"directory,optional"`
+	IndexPage string `hcl:"index,optional"`
+	NotFoundPage string `hcl:"not_found,optional"`
 }
 
 type Platform struct {
@@ -60,35 +116,6 @@ func (p *Platform) DeployFunc() interface{} {
 	return p.deploy
 }
 
-// this creates a new bucket in the project
-// func createBucket(projectID, bucketName string) error {
-// 	ctx := context.Background()
-// 	client, err := storage.NewClient(ctx)
-// 	if err != nil {
-// 		return fmt.Errorf("storage.NewClient: %v", err)
-// 	}
-// 	defer client.Close()
-
-// 	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
-// 	defer cancel()
-
-// 	bucket := client.Bucket(bucketName)
-// 	if err := bucket.Create(ctx, projectID, nil); err != nil {
-// 		return fmt.Errorf("Bucket(%q).Create: %v", bucketName, err)
-// 	}
-
-// 	fmt.Fprintf(w, "Bucket %v created\n", bucketName)
-
-// 	return nil
-// }
-
-// In addition to default input parameters the registry.Artifact from the Build step
-// can also be injected.
-//
-// The output parameters for BuildFunc must be a Struct which can
-// be serialzied to Protocol Buffers binary format and an error.
-// This Output Value will be made available for other functions
-// as an input parameter.
 // If an error is returned, Waypoint stops the execution flow and
 // returns an error to the user.
 func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, error) {
@@ -96,8 +123,13 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 	defer u.Close()
 	u.Step("", "---Deploying Cloud Storage Assets---")
 
+	// configure defaults
 	if p.config.Directory == "" {
 		p.config.Directory = "./build"
+	}
+
+	if p.config.IndexPage == "" {
+		p.config.IndexPage = "index.html"
 	}
 
 	client, err := storage.NewClient(ctx)
@@ -120,10 +152,55 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 			return nil, err
 		}
 
+		newBktAttrs := storage.BucketAttrsToUpdate{
+			UniformBucketLevelAccess: &storage.UniformBucketLevelAccess{
+				Enabled: true,
+			},
+		}
+
+		if _, err := bkt.Update(ctx, newBktAttrs); err != nil {
+			u.Step(terminal.StatusError, fmt.Sprintf("Error configuring %s to be uniformly accessible", attrs.Name))
+			return nil, err
+		}
+
 		u.Step(terminal.StatusOK, fmt.Sprintf("Bucket %s successfully created", p.config.Bucket))
 	} else {
 		u.Step(terminal.StatusOK, fmt.Sprintf("Found existing bucket %s", attrs.Name))
 	}
-	
+
+	u.Update("Configuring bucket for website hosting...")
+
+	bktAttrsToUpdate := storage.BucketAttrsToUpdate{
+		Website: &storage.BucketWebsite{
+			MainPageSuffix: p.config.IndexPage,
+			NotFoundPage: p.config.NotFoundPage,
+		},
+	}
+
+	if _, err := bkt.Update(ctx, bktAttrsToUpdate); err != nil {
+		u.Step(terminal.StatusError, fmt.Sprintf("Error configuring %s to host static content", p.config.Bucket))
+		return nil, err
+	}
+
+	// set all objects to be publicly readable
+	public, err := areObjectsPublic(ctx, client, p.config.Bucket)
+	if err != nil {
+		u.Step(terminal.StatusError, "Error accessing bucket's IAM policy")
+		return nil, err
+	}
+
+	if !public {
+		if _, err := setPublicIAM(ctx, client, p.config.Bucket); err != nil {
+			u.Step(terminal.StatusError, fmt.Sprintf("Error configuring %s objects to be publicly accessible", p.config.Bucket))
+			return nil, err
+		}
+	}
+
+	u.Step(terminal.StatusOK, fmt.Sprintf("Objects within %s are publicly accessible", p.config.Bucket))
+
+	u.Update("Uploading static files...")
+
+	// TODO
+
 	return &Deployment{}, nil
 }
