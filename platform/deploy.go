@@ -3,12 +3,18 @@ package platform
 import (
 	"context"
 	"fmt"
+	"os"
+	// "time"
 
+	"cloud.google.com/go/storage"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
 )
 
 type DeployConfig struct {
-	Region string "hcl:directory,optional"
+	Bucket string `hcl:"bucket"`
+	Project string `hcl:"project"`
+	Region string `hcl:"region,optional"`
+	Directory string `hcl:"directory,optional"`
 }
 
 type Platform struct {
@@ -30,7 +36,17 @@ func (p *Platform) ConfigSet(config interface{}) error {
 
 	// validate the config
 	if c.Region == "" {
-		return fmt.Errorf("Region must be set to a valid directory")
+		return fmt.Errorf("Region must be set to a valid GCP region")
+	}
+
+	if c.Bucket == "" {
+		return fmt.Errorf("Bucket is a required attribute")
+	}
+
+	_, err := os.Stat(c.Directory)
+
+	if err != nil {
+		return fmt.Errorf("Directory you specified does not exist")
 	}
 
 	return nil
@@ -42,22 +58,27 @@ func (p *Platform) DeployFunc() interface{} {
 	return p.deploy
 }
 
-// A BuildFunc does not have a strict signature, you can define the parameters
-// you need based on the Available parameters that the Waypoint SDK provides.
-// Waypoint will automatically inject parameters as specified
-// in the signature at run time.
-//
-// Available input parameters:
-// - context.Context
-// - *component.Source
-// - *component.JobInfo
-// - *component.DeploymentConfig
-// - *datadir.Project
-// - *datadir.App
-// - *datadir.Component
-// - hclog.Logger
-// - terminal.UI
-// - *component.LabelSet
+// this creates a new bucket in the project
+// func createBucket(projectID, bucketName string) error {
+// 	ctx := context.Background()
+// 	client, err := storage.NewClient(ctx)
+// 	if err != nil {
+// 		return fmt.Errorf("storage.NewClient: %v", err)
+// 	}
+// 	defer client.Close()
+
+// 	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
+// 	defer cancel()
+
+// 	bucket := client.Bucket(bucketName)
+// 	if err := bucket.Create(ctx, projectID, nil); err != nil {
+// 		return fmt.Errorf("Bucket(%q).Create: %v", bucketName, err)
+// 	}
+
+// 	fmt.Fprintf(w, "Bucket %v created\n", bucketName)
+
+// 	return nil
+// }
 
 // In addition to default input parameters the registry.Artifact from the Build step
 // can also be injected.
@@ -68,10 +89,32 @@ func (p *Platform) DeployFunc() interface{} {
 // as an input parameter.
 // If an error is returned, Waypoint stops the execution flow and
 // returns an error to the user.
-func (b *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, error) {
+func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, error) {
 	u := ui.Status()
 	defer u.Close()
-	u.Update("Deploy application")
+	u.Step("", "---Deploying Cloud Storage Assets---")
+
+	if p.config.Directory == "" {
+		p.config.Directory = "./build"
+	}
+
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		u.Step(terminal.StatusError, "Error connecting to Cloud Storage API")
+		return nil, err
+	}
+	defer client.Close()
+
+	u.Update("Configuring Cloud Storage bucket...")
+	bkt := client.Bucket(p.config.Bucket)
+
+	attrs, err := bkt.Attrs(ctx)
+	if err != nil {
+		u.Step(terminal.StatusError, "Error accessing bucket attributes")
+		return nil, err
+	}
+
+	u.Step(terminal.StatusOK, fmt.Sprintf("Found bucket %s created at %s", attrs.Name, attrs.Created))
 
 	return &Deployment{}, nil
 }
