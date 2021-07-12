@@ -43,10 +43,12 @@ func (p *Platform) ConfigSet(config interface{}) error {
 		return fmt.Errorf("Bucket is a required attribute")
 	}
 
-	_, err := os.Stat(c.Directory)
+	if c.Directory != "" {
+		_, err := os.Stat(c.Directory)
 
-	if err != nil {
-		return fmt.Errorf("Directory you specified does not exist")
+		if err != nil {
+			return fmt.Errorf("Directory you specified does not exist")
+		}
 	}
 
 	return nil
@@ -109,12 +111,19 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 	bkt := client.Bucket(p.config.Bucket)
 
 	attrs, err := bkt.Attrs(ctx)
+	// if this errors out, bucket doesn't exist
 	if err != nil {
-		u.Step(terminal.StatusError, "Error accessing bucket attributes")
-		return nil, err
+		u.Update(fmt.Sprintf("Bucket %s not found, creating new one...", p.config.Bucket))
+		
+		if err := bkt.Create(ctx, p.config.Project, nil); err != nil {
+			u.Step(terminal.StatusError, "Error creating new bucket")
+			return nil, err
+		}
+
+		u.Step(terminal.StatusOK, fmt.Sprintf("Bucket %s successfully created", p.config.Bucket))
+	} else {
+		u.Step(terminal.StatusOK, fmt.Sprintf("Found existing bucket %s", attrs.Name))
 	}
-
-	u.Step(terminal.StatusOK, fmt.Sprintf("Found bucket %s created at %s", attrs.Name, attrs.Created))
-
+	
 	return &Deployment{}, nil
 }
