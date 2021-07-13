@@ -12,7 +12,9 @@ import (
 	"github.com/pilot-framework/gcp-cdn-waypoint-plugin/platform"
 )
 
-type ReleaseConfig struct{}
+type ReleaseConfig struct {
+	Domain string `hcl:"domain"`
+}
 
 type ReleaseManager struct {
 	config ReleaseConfig
@@ -32,6 +34,9 @@ func (rm *ReleaseManager) ConfigSet(config interface{}) error {
 	}
 
 	// validate the config
+	if rm.config.Domain == "" {
+		return fmt.Errorf("Domain is a required attribute")
+	}
 
 	return nil
 }
@@ -74,9 +79,8 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 }
 
 func GetStaticIP(b, projID string) (string, error) {
-	ipName := b + "-ip"
 	var stdout, stderr bytes.Buffer
-	cmd := exec.Command("gcloud", "compute", "addresses", "describe", ipName, "--format=get(address)", "--global", "--project="+projID)
+	cmd := exec.Command("gcloud", "compute", "addresses", "describe", b+"-ip", "--format=get(address)", "--global", "--project="+projID)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
@@ -109,3 +113,43 @@ func ReserveIPAddress(b, projID string) (string, error) {
 	}
 	return string(bytes.TrimSpace(stdout.Bytes())), nil
 }
+
+func CreateBackendBucket(b, projID string) (string, error) {
+	var stdout, stderr bytes.Buffer
+	cmd := exec.Command("gcloud", "compute", "backend-buckets", b+"-backend-bucket", "--gcs-bucket-name="+"b", "--enable-cdn", "--project="+projID)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		return "", errors.New(string(bytes.TrimSpace(stderr.Bytes())))
+	}
+	return string(bytes.TrimSpace(stdout.Bytes())), nil
+}
+
+func CreateURLMap(b, projID string) (string, error) {
+	var stdout, stderr bytes.Buffer
+	cmd := exec.Command("gcloud", "compute", "url-maps", "create", b+"-lb", "--default-backend-bucket="+b+"-backend-bucket", "--project="+projID)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		return "", errors.New(string(bytes.TrimSpace(stderr.Bytes())))
+	}
+	return string(bytes.TrimSpace(stdout.Bytes())), nil
+}
+
+func CreateSSLCert(b, projID, domain string) (string, error) {
+	var stdout, stderr bytes.Buffer
+	cmd := exec.Command("gcloud", "compute", "ssl-certificates", "create", b+"-cert", "--domains="+domain, "--global", "--project="+projID)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		return "", errors.New(string(bytes.TrimSpace(stderr.Bytes())))
+	}
+	return string(bytes.TrimSpace(stdout.Bytes())), nil
+}
+
+//TODO: configure target https proxy
+// see - gcloud compute target-https-proxies create --help
+//TODO: configure forwarding rule to reserved ip and target proxy
