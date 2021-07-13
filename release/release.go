@@ -46,7 +46,7 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 	u := ui.Status()
 	defer u.Close()
 	u.Step("", "---Releasing to Cloud CDN---")
-	// res, err := GetStaticIP(target.Bucket, target.Project)
+
 	out, err := ListIPAddresses(target.Project)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get listing of external IPs: %s", err.Error())
@@ -55,12 +55,12 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 	if strings.Contains(out, target.Bucket) {
 		u.Step(terminal.StatusOK, "Found existing external IP address")
 	} else {
-		u.Step("", "Generating external IP address")
-		_, err := GenerateIPAddress(target.Bucket, target.Project)
+		u.Step("", "Reserving external IP address")
+		_, err := ReserveIPAddress(target.Bucket, target.Project)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get listing of external IPs: %s", err.Error())
 		}
-		u.Step(terminal.StatusOK, "External IP generated")
+		u.Step(terminal.StatusOK, "External IP reserved")
 	}
 
 	ipAddr, err := GetStaticIP(target.Bucket, target.Project)
@@ -98,7 +98,7 @@ func ListIPAddresses(projID string) (string, error) {
 	return string(bytes.TrimSpace(stdout.Bytes())), nil
 }
 
-func GenerateIPAddress(b, projID string) (string, error) {
+func ReserveIPAddress(b, projID string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd := exec.Command("gcloud", "compute", "addresses", "create", b+"-ip", "--network-tier=PREMIUM", "--ip-version=IPV4", "--global", "--project="+projID)
 	cmd.Stdout = &stdout
