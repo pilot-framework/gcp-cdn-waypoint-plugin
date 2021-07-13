@@ -73,6 +73,7 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 		return nil, fmt.Errorf("failed to get external IP: %s", err.Error())
 	}
 
+	//TODO: load balance configuration
 	u.Step("", "ipaddress="+ipAddr)
 
 	return &Release{}, nil
