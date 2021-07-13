@@ -13,6 +13,7 @@ type GCloud struct {
 	BackendBucket *BackendBucket
 	URLMap *URLMap
 	SSLCert *SSLCert
+	Proxy *Proxy
 }
 
 func Init(project, bucket string) *GCloud {
@@ -25,6 +26,8 @@ func Init(project, bucket string) *GCloud {
 	gc.BackendBucket = &BackendBucket{g: gc}
 	gc.URLMap = &URLMap{g: gc}
 	gc.SSLCert = &SSLCert{g: gc}
+	gc.Proxy = &Proxy{g: gc}
+	gc.ForwardRule = &ForwardRule{g: gc}
 
 	return gc
 }
@@ -45,22 +48,31 @@ type IP struct {
 	g *GCloud
 }
 
-func (ip *IP) List() (string, error) {
-	return ip.g.Exec([]string{
-		"compute", "addresses", "list", "--project="+ip.g.Project,
-	})
-}
-
-func (ip *IP) GetStatic() (string, error) {
-	return ip.g.Exec([]string{
-		"compute", "addresses", "describe", ip.g.Bucket+"-ip", "--format=get(address)", "--global", "--project="+ip.g.Project,
-	})
-}
-
 func (ip *IP) Reserve() (string, error) {
 	return ip.g.Exec([]string{
-		"compute", "addresses", "create", ip.g.Bucket+"-ip", "--network-tier=PREMIUM", "--ip-version=IPV4", "--global", "--project="+ip.g.Project,
+		"compute",
+		"addresses",
+		"create", ip.g.Bucket+"-ip",
+		"--network-tier=PREMIUM",
+		"--ip-version=IPV4",
+		"--global",
+		"--project="+ip.g.Project,
 	})
+}
+
+func (ip *IP) Exists() bool {
+	_, err := ip.g.Exec([]string{
+		"compute",
+		"addresses",
+		"describe",
+		ip.g.Bucket+"-ip",
+	})
+
+	if err != nil {
+		return false
+	} else {
+		return true
+	}
 }
 
 type BackendBucket struct {
@@ -69,13 +81,21 @@ type BackendBucket struct {
 
 func (b *BackendBucket) Create() (string, error) {
 	return b.g.Exec([]string{
-		"compute", "backend-buckets", b.g.Bucket+"-backend-bucket", "--gcs-bucket-name="+b.g.Bucket, "--enable-cdn", "--project="+b.g.Project,
+		"compute",
+		"backend-buckets",
+		b.g.Bucket+"-backend-bucket",
+		"--gcs-bucket-name="+b.g.Bucket,
+		"--enable-cdn",
+		"--project="+b.g.Project,
 	})
 }
 
 func (b *BackendBucket) Exists() bool {
 	_, err := b.g.Exec([]string{
-		"compute", "backend-buckets", "describe", b.g.Bucket+"-backend-bucket",
+		"compute",
+		"backend-buckets",
+		"describe",
+		b.g.Bucket+"-backend-bucket",
 	})
 
 	if err != nil {
@@ -91,13 +111,85 @@ type URLMap struct {
 
 func (u *URLMap) Create() (string, error) {
 	return u.g.Exec([]string{
-		"compute", "url-maps", "create", u.g.Bucket+"-lb", "--default-backend-bucket="+u.g.Bucket+"-backend-bucket", "--project="+u.g.Project,
+		"compute",
+		"url-maps",
+		"create",
+		u.g.Bucket+"-lb",
+		"--default-backend-bucket="+u.g.Bucket+"-backend-bucket",
+		"--project="+u.g.Project,
 	})
 }
 
 func (u *URLMap) Exists() bool {
 	_, err := u.g.Exec([]string{
-		"compute", "url-maps", "describe", u.g.Bucket+"-lb",
+		"compute",
+		"url-maps",
+		"describe",
+		u.g.Bucket+"-lb",
+	})
+
+	if err != nil {
+		return false
+	} else {
+		return true
+	}
+}
+
+type Proxy struct {
+	g *GCloud
+}
+
+// type is a reserved word :/
+func (p *Proxy) Create(which string) (string, error) {
+	return p.g.Exec([]string{
+		"compute", 
+		"target-"+which+"-proxies",
+		"create", p.g.Bucket+"-lb-proxy",
+		"--url-map="+p.g.Bucket+"-lb",
+		"--ssl-certificate="+p.g.Bucket+"-cert",
+		"--project="+p.g.Project,
+	})
+}
+
+func (p *Proxy) Exists(which string) bool {
+	_, err := p.g.Exec([]string{
+		"compute",
+		"target-"+which+"-proxies",
+		"describe",
+		p.g.Bucket+"-lb-proxy",
+	})
+
+	if err != nil {
+		return false
+	} else {
+		return true
+	}
+}
+
+type ForwardRule struct {
+	g *GCloud
+}
+
+func (f *ForwardRule) Create() (string, error) {
+	return f.g.Exec([]string{
+		"compute",
+		"forwarding-rules",
+		"create",
+		f.g.Bucket+"-lb-forwarding-rule",
+		"--address="+f.g.Bucket+"-ip",
+		"--global",
+		"--target-https-proxy="+f.g.Bucket+"-lb-proxy",
+		"--ports=443",
+		"--project="+f.g.Project,
+	})
+}
+
+func (f *ForwardRule) Exists() bool {
+	_, err := f.g.Exec([]string{
+		"compute",
+		"forwarding-rules",
+		"describe",
+		f.g.Bucket+"-lb-forwarding-rule",
 	})
 
 	if err != nil {
@@ -113,13 +205,20 @@ type SSLCert struct {
 
 func (s *SSLCert) Create(domain string) (string, error) {
 	return s.g.Exec([]string{
-		"compute", "ssl-certificates", "create", s.g.Bucket+"-cert", "--domains="+domain, "--global", "--project="+s.g.Project,
+		"compute",
+		"ssl-certificates",
+		"create", s.g.Bucket+"-cert",
+		"--domains="+domain, "--global",
+		"--project="+s.g.Project,
 	})
 }
 
 func (s *SSLCert) Exists() bool {
 	_, err := s.g.Exec([]string{
-		"compute", "ssl-certificates", "describe", s.g.Bucket+"-cert",
+		"compute",
+		"ssl-certificates",
+		"describe",
+		s.g.Bucket+"-cert",
 	})
 
 	if err != nil {
