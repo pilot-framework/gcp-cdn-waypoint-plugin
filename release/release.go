@@ -154,3 +154,26 @@ func CreateSSLCert(b, projID, domain string) (string, error) {
 //TODO: configure target https proxy
 // see - gcloud compute target-https-proxies create --help
 //TODO: configure forwarding rule to reserved ip and target proxy
+func CreateHTTPSProxy(b, projID string) (string, error) {
+	var stdout, stderr bytes.Buffer
+	cmd := exec.Command("gcloud", "compute", "target-https-proxies", "create", b+"-lb-proxy", "--url-map="+b+"-lb", "--ssl-certificates="+b+"-cert", "--project="+projID)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		return "", errors.New(string(bytes.TrimSpace(stderr.Bytes())))
+	}
+	return string(bytes.TrimSpace(stdout.Bytes())), nil
+}
+
+func CreateForwardingRule(b, projID string) (string, error) {
+	var stdout, stderr bytes.Buffer
+	cmd := exec.Command("gcloud", "compute", "forwarding-rules", "create", b+"-lb-forwarding-rule", "--address="+b+"-ip", "--global", "--target-https-proxy="+b+"-lb-proxy", "--ports=443", "--project="+projID)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		return "", errors.New(string(bytes.TrimSpace(stderr.Bytes())))
+	}
+	return string(bytes.TrimSpace(stdout.Bytes())), nil
+}
