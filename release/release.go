@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/pilot-framework/gcp-cdn-waypoint-plugin/gcloud"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
+	"github.com/pilot-framework/gcp-cdn-waypoint-plugin/platform"
 )
 
 type ReleaseConfig struct {
-	Active bool "hcl:directory,optional"
+	Domain string `hcl:"domain"`
 }
 
 type ReleaseManager struct {
@@ -29,6 +31,9 @@ func (rm *ReleaseManager) ConfigSet(config interface{}) error {
 	}
 
 	// validate the config
+	if rm.config.Domain == "" {
+		return fmt.Errorf("Domain is a required attribute")
+	}
 
 	return nil
 }
@@ -39,37 +44,102 @@ func (rm *ReleaseManager) ReleaseFunc() interface{} {
 	return rm.release
 }
 
-// A BuildFunc does not have a strict signature, you can define the parameters
-// you need based on the Available parameters that the Waypoint SDK provides.
-// Waypoint will automatically inject parameters as specified
-// in the signature at run time.
-//
-// Available input parameters:
-// - context.Context
-// - *component.Source
-// - *component.JobInfo
-// - *component.DeploymentConfig
-// - *datadir.Project
-// - *datadir.App
-// - *datadir.Component
-// - hclog.Logger
-// - terminal.UI
-// - *component.LabelSet
-
-// In addition to default input parameters the platform.Deployment from the Deploy step
-// can also be injected.
-//
-// The output parameters for ReleaseFunc must be a Struct which can
-// be serialzied to Protocol Buffers binary format and an error.
-// This Output Value will be made available for other functions
-// as an input parameter.
-//
-// If an error is returned, Waypoint stops the execution flow and
-// returns an error to the user.
-func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI) (*Release, error) {
+func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *platform.Deployment) (*Release, error) {
 	u := ui.Status()
 	defer u.Close()
-	u.Update("Release application")
+	u.Step("", "---Releasing to Cloud CDN---")
+
+	gc := gcloud.Init(target.Project, target.Bucket)
+
+	// PROVISION IP ADDRESS
+	u.Update("Configuring IP Address...")
+
+	if gc.IP.Exists() {
+		u.Step(terminal.StatusOK, "Found existing external IP Address")
+	} else {
+		u.Update("Reserving new external IP Address...")
+		_, err := gc.IP.Reserve()
+		if err != nil {
+			return nil, fmt.Errorf("failed to reserve IP Address: %s", err.Error())
+		}
+
+		u.Step(terminal.StatusOK, "Reserved new external IP Address")
+	}
+
+	// PROVISION BACKEND BUCKET
+	u.Update("Configuring backend bucket...")
+
+	if gc.BackendBucket.Exists() {
+		u.Step(terminal.StatusOK, "Found existing backend bucket")
+	} else {
+		u.Update("Creating new backend bucket...")
+		_, err := gc.BackendBucket.Create()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create backend bucket: %s", err.Error())
+		}
+
+		u.Step(terminal.StatusOK, "Created new backend bucket")
+	}
+
+	// PROVISION LOAD BALANCER
+	u.Update("Configuring load balancer...")
+
+	if gc.URLMap.Exists() {
+		u.Step(terminal.StatusOK, "Found existing load balancer")
+	} else {
+		u.Update("Creating new load balancer...")
+		_, err := gc.URLMap.Create()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create load balancer: %s", err.Error())
+		}
+
+		u.Step(terminal.StatusOK, "Created new load balancer")
+	}
+
+	// GENERATE SSL CERTIFICATE
+	u.Update("Configuring SSL Certificate...")
+
+	if gc.SSLCert.Exists() {
+		u.Step(terminal.StatusOK, "Found existing SSL Certificate")
+	} else {
+		u.Update("Generating Google-managed SSL Certificate...")
+		_, err := gc.SSLCert.Create(rm.config.Domain)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate SSL Certificate: %s", err.Error())
+		}
+
+		u.Step(terminal.StatusOK, "Generated Google-managed SSL Certificate")
+	}
+
+	// PROVISION HTTPS PROXY
+	u.Update("Configuring HTTPS proxy...")
+
+	if gc.Proxy.Exists("https") {
+		u.Step(terminal.StatusOK, "Found existing HTTPS proxy")
+	} else {
+		u.Update("Creating new HTTPS proxy...")
+		_, err := gc.Proxy.Create("https")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HTTPS proxy: %s", err.Error())
+		}
+
+		u.Step(terminal.StatusOK, "Created new HTTPS proxy")
+	}
+
+	// CREATE FORWARDING RULE
+	u.Update("Configuring forwarding rules...")
+
+	if gc.ForwardRule.Exists() {
+		u.Step(terminal.StatusOK, "Found existing forwarding rule")
+	} else {
+		u.Update("Creating new forwarding rule...")
+		_, err := gc.ForwardRule.Create()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create forwarding rule: %s", err.Error())
+		}
+
+		u.Step(terminal.StatusOK, "Created new forwarding rule")
+	}
 
 	return &Release{}, nil
 }

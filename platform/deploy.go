@@ -3,12 +3,116 @@ package platform
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 
+	"cloud.google.com/go/iam"
+	"cloud.google.com/go/storage"
+	iampb "google.golang.org/genproto/googleapis/iam/v1"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
 )
 
+func setPublicIAM(
+	c context.Context,
+	client *storage.Client,
+	bucketName string,
+) (bool, error) {
+	policy, err := client.Bucket(bucketName).IAM().V3().Policy(c)
+	if err != nil {
+		return false, err
+	}
+
+	role := "roles/storage.objectViewer"
+	policy.Bindings = append(policy.Bindings, &iampb.Binding{
+		Role: role,
+		Members: []string{iam.AllUsers},
+	})
+
+	if err := client.Bucket(bucketName).IAM().V3().SetPolicy(c, policy); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func includesAllUsers(members []string) bool {
+	for _, member := range members {
+		if member == iam.AllUsers {
+			return true
+		}
+	}
+
+	return false
+}
+
+// checks to see if correct IAM roles are already set up
+func areObjectsPublic(
+	c context.Context,
+	client *storage.Client,
+	bucketName string,
+) (bool, error) {
+	policy, err := client.Bucket(bucketName).IAM().V3().Policy(c)
+	if err != nil {
+		return false, err
+	}
+
+	for _, binding := range policy.Bindings {
+		if binding.Role == "roles/storage.objectViewer" && includesAllUsers(binding.Members) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// TODO: handle dynamic build paths
+func uploadFiles(
+	c context.Context,
+	client *storage.Client,
+	bucketName string,
+	subPath string,
+	errors *[]string,
+) []string {
+	files, err := os.ReadDir("./build/" + subPath)
+	if err != nil {
+		*errors = append(*errors, err.Error())
+	}
+
+	for _, file := range files {
+		if file.IsDir() {
+			uploadFiles(c, client, bucketName, subPath+file.Name()+"/", errors)
+			continue
+		}
+
+		f, err := os.Open("./build/" + subPath + file.Name())
+		if err != nil {
+			*errors = append(*errors, err.Error())
+			continue
+		}
+		defer f.Close()
+
+		wc := client.Bucket(bucketName).Object(subPath + file.Name()).NewWriter(c)
+		if _, err = io.Copy(wc, f); err != nil {
+			*errors = append(*errors, err.Error())
+			continue
+		}
+
+		if err := wc.Close(); err != nil {
+			*errors = append(*errors, err.Error())
+			continue
+		}
+	}
+
+	return *errors
+}
+
 type DeployConfig struct {
-	Region string "hcl:directory,optional"
+	Bucket string `hcl:"bucket"`
+	Project string `hcl:"project"`
+	Region string `hcl:"region,optional"`
+	Directory string `hcl:"directory,optional"`
+	IndexPage string `hcl:"index,optional"`
+	NotFoundPage string `hcl:"not_found,optional"`
 }
 
 type Platform struct {
@@ -30,7 +134,19 @@ func (p *Platform) ConfigSet(config interface{}) error {
 
 	// validate the config
 	if c.Region == "" {
-		return fmt.Errorf("Region must be set to a valid directory")
+		return fmt.Errorf("Region must be set to a valid GCP region")
+	}
+
+	if c.Bucket == "" {
+		return fmt.Errorf("Bucket is a required attribute")
+	}
+
+	if c.Directory != "" {
+		_, err := os.Stat(c.Directory)
+
+		if err != nil {
+			return fmt.Errorf("Directory you specified does not exist")
+		}
 	}
 
 	return nil
@@ -42,36 +158,102 @@ func (p *Platform) DeployFunc() interface{} {
 	return p.deploy
 }
 
-// A BuildFunc does not have a strict signature, you can define the parameters
-// you need based on the Available parameters that the Waypoint SDK provides.
-// Waypoint will automatically inject parameters as specified
-// in the signature at run time.
-//
-// Available input parameters:
-// - context.Context
-// - *component.Source
-// - *component.JobInfo
-// - *component.DeploymentConfig
-// - *datadir.Project
-// - *datadir.App
-// - *datadir.Component
-// - hclog.Logger
-// - terminal.UI
-// - *component.LabelSet
-
-// In addition to default input parameters the registry.Artifact from the Build step
-// can also be injected.
-//
-// The output parameters for BuildFunc must be a Struct which can
-// be serialzied to Protocol Buffers binary format and an error.
-// This Output Value will be made available for other functions
-// as an input parameter.
 // If an error is returned, Waypoint stops the execution flow and
 // returns an error to the user.
-func (b *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, error) {
+func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, error) {
 	u := ui.Status()
 	defer u.Close()
-	u.Update("Deploy application")
+	u.Step("", "---Deploying Cloud Storage Assets---")
 
-	return &Deployment{}, nil
+	// configure defaults
+	if p.config.Directory == "" {
+		p.config.Directory = "./build"
+	}
+
+	if p.config.IndexPage == "" {
+		p.config.IndexPage = "index.html"
+	}
+
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		u.Step(terminal.StatusError, "Error connecting to Cloud Storage API")
+		return nil, err
+	}
+	defer client.Close()
+
+	u.Update("Configuring Cloud Storage bucket...")
+	bkt := client.Bucket(p.config.Bucket)
+
+	attrs, err := bkt.Attrs(ctx)
+	// if this errors out, bucket doesn't exist
+	if err != nil {
+		u.Update(fmt.Sprintf("Bucket %s not found, creating new one...", p.config.Bucket))
+		
+		if err := bkt.Create(ctx, p.config.Project, nil); err != nil {
+			u.Step(terminal.StatusError, "Error creating new bucket")
+			return nil, err
+		}
+
+		newBktAttrs := storage.BucketAttrsToUpdate{
+			UniformBucketLevelAccess: &storage.UniformBucketLevelAccess{
+				Enabled: true,
+			},
+		}
+
+		if _, err := bkt.Update(ctx, newBktAttrs); err != nil {
+			u.Step(terminal.StatusError, fmt.Sprintf("Error configuring %s to be uniformly accessible", attrs.Name))
+			return nil, err
+		}
+
+		u.Step(terminal.StatusOK, fmt.Sprintf("Bucket %s successfully created", p.config.Bucket))
+	} else {
+		u.Step(terminal.StatusOK, fmt.Sprintf("Found existing bucket %s", attrs.Name))
+	}
+
+	u.Update("Configuring bucket for website hosting...")
+
+	bktAttrsToUpdate := storage.BucketAttrsToUpdate{
+		Website: &storage.BucketWebsite{
+			MainPageSuffix: p.config.IndexPage,
+			NotFoundPage: p.config.NotFoundPage,
+		},
+	}
+
+	if _, err := bkt.Update(ctx, bktAttrsToUpdate); err != nil {
+		u.Step(terminal.StatusError, fmt.Sprintf("Error configuring %s to host static content", p.config.Bucket))
+		return nil, err
+	}
+
+	// set all objects to be publicly readable
+	public, err := areObjectsPublic(ctx, client, p.config.Bucket)
+	if err != nil {
+		u.Step(terminal.StatusError, "Error accessing bucket's IAM policy")
+		return nil, err
+	}
+
+	if !public {
+		if _, err := setPublicIAM(ctx, client, p.config.Bucket); err != nil {
+			u.Step(terminal.StatusError, fmt.Sprintf("Error configuring %s objects to be publicly accessible", p.config.Bucket))
+			return nil, err
+		}
+	}
+
+	u.Step(terminal.StatusOK, fmt.Sprintf("Objects within %s are publicly accessible", p.config.Bucket))
+
+	u.Update("Uploading static files...")
+
+	fileErrors := []string{}
+	uploadFiles(ctx, client, p.config.Bucket, "", &fileErrors)
+
+	if len(fileErrors) > 0 {
+		u.Step(terminal.StatusWarn, "Some static files failed to upload")
+	}
+
+	u.Step(terminal.StatusOK, "Upload of static files complete")
+
+	return &Deployment{
+		Bucket: p.config.Bucket,
+		Region: p.config.Region,
+		Project: p.config.Project,
+	}, nil
 }
