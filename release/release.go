@@ -63,18 +63,51 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 		u.Step("", "Reserving external IP address")
 		_, err := ReserveIPAddress(target.Bucket, target.Project)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get listing of external IPs: %s", err.Error())
+			return nil, fmt.Errorf("failed to reserve IP address: %s", err.Error())
 		}
 		u.Step(terminal.StatusOK, "External IP reserved")
 	}
 
-	ipAddr, err := GetStaticIP(target.Bucket, target.Project)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get external IP: %s", err.Error())
-	}
+	// Uncomment if the static IP address is needed during execution
+	// ipAddr, err := GetStaticIP(target.Bucket, target.Project)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to get external IP: %s", err.Error())
+	// }
 
-	//TODO: load balance configuration
-	u.Step("", "ipaddress="+ipAddr)
+	u.Step("", "Creating Backend Bucket")
+	_, err = CreateBackendBucket(target.Bucket, target.Project)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create backed bucket: %s", err.Error())
+	}
+	u.Step(terminal.StatusOK, "Backend Bucket Created")
+
+	u.Step("", "Creating Load Balancer")
+	_, err = CreateURLMap(target.Bucket, target.Project)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create load balancer: %s", err.Error())
+	}
+	u.Step(terminal.StatusOK, "Load Balancer Created")
+
+	u.Step("", "Generating managed SSL Certificate")
+	_, err = CreateSSLCert(target.Bucket, target.Project, rm.config.Domain)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate SSL certificate: %s", err.Error())
+	}
+	u.Step(terminal.StatusOK, "SSL Certificate Generated")
+
+	u.Step("", "Creating HTTPS Target Proxy")
+	_, err = CreateHTTPSProxy(target.Bucket, target.Project)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create target proxy: %s", err.Error())
+	}
+	u.Step(terminal.StatusOK, "HTTPS Target Proxy Created")
+
+	u.Step("", "Creating Forwarding Rule")
+	_, err = CreateForwardingRule(target.Bucket, target.Project)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create forwarding rule: %s", err.Error())
+	}
+	u.Step(terminal.StatusOK, "Forwarding Rule Created")
 
 	return &Release{}, nil
 }
@@ -117,7 +150,7 @@ func ReserveIPAddress(b, projID string) (string, error) {
 
 func CreateBackendBucket(b, projID string) (string, error) {
 	var stdout, stderr bytes.Buffer
-	cmd := exec.Command("gcloud", "compute", "backend-buckets", b+"-backend-bucket", "--gcs-bucket-name="+"b", "--enable-cdn", "--project="+projID)
+	cmd := exec.Command("gcloud", "compute", "backend-buckets", "create", b+"-backend-bucket", "--gcs-bucket-name="+b, "--enable-cdn", "--project="+projID)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
@@ -151,9 +184,6 @@ func CreateSSLCert(b, projID, domain string) (string, error) {
 	return string(bytes.TrimSpace(stdout.Bytes())), nil
 }
 
-//TODO: configure target https proxy
-// see - gcloud compute target-https-proxies create --help
-//TODO: configure forwarding rule to reserved ip and target proxy
 func CreateHTTPSProxy(b, projID string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd := exec.Command("gcloud", "compute", "target-https-proxies", "create", b+"-lb-proxy", "--url-map="+b+"-lb", "--ssl-certificates="+b+"-cert", "--project="+projID)
