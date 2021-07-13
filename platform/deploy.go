@@ -8,8 +8,8 @@ import (
 
 	"cloud.google.com/go/iam"
 	"cloud.google.com/go/storage"
-	iampb "google.golang.org/genproto/googleapis/iam/v1"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
+	iampb "google.golang.org/genproto/googleapis/iam/v1"
 )
 
 func setPublicIAM(
@@ -24,7 +24,7 @@ func setPublicIAM(
 
 	role := "roles/storage.objectViewer"
 	policy.Bindings = append(policy.Bindings, &iampb.Binding{
-		Role: role,
+		Role:    role,
 		Members: []string{iam.AllUsers},
 	})
 
@@ -107,11 +107,11 @@ func uploadFiles(
 }
 
 type DeployConfig struct {
-	Bucket string `hcl:"bucket"`
-	Project string `hcl:"project"`
-	Region string `hcl:"region,optional"`
-	Directory string `hcl:"directory,optional"`
-	IndexPage string `hcl:"index,optional"`
+	Bucket       string `hcl:"bucket"`
+	Project      string `hcl:"project"`
+	Region       string `hcl:"region,optional"`
+	Directory    string `hcl:"directory,optional"`
+	IndexPage    string `hcl:"index,optional"`
 	NotFoundPage string `hcl:"not_found,optional"`
 }
 
@@ -188,8 +188,9 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 	// if this errors out, bucket doesn't exist
 	if err != nil {
 		u.Update(fmt.Sprintf("Bucket %s not found, creating new one...", p.config.Bucket))
-		
-		if err := bkt.Create(ctx, p.config.Project, nil); err != nil {
+
+		if err := bkt.Create(ctx, p.config.Project,
+			&storage.BucketAttrs{Location: p.config.Region, LocationType: "region"}); err != nil {
 			u.Step(terminal.StatusError, "Error creating new bucket")
 			return nil, err
 		}
@@ -215,7 +216,7 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 	bktAttrsToUpdate := storage.BucketAttrsToUpdate{
 		Website: &storage.BucketWebsite{
 			MainPageSuffix: p.config.IndexPage,
-			NotFoundPage: p.config.NotFoundPage,
+			NotFoundPage:   p.config.NotFoundPage,
 		},
 	}
 
@@ -252,8 +253,8 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 	u.Step(terminal.StatusOK, "Upload of static files complete")
 
 	return &Deployment{
-		Bucket: p.config.Bucket,
-		Region: p.config.Region,
+		Bucket:  p.config.Bucket,
+		Region:  p.config.Region,
 		Project: p.config.Project,
 	}, nil
 }
