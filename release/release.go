@@ -3,7 +3,6 @@ package release
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/pilot-framework/gcp-cdn-waypoint-plugin/gcloud"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
@@ -116,7 +115,7 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 	u.Update("Configuring HTTPS proxy...")
 
 	if gc.Proxy.Exists("https") {
-		u.Step("Found existing HTTPS proxy")
+		u.Step(terminal.StatusOK, "Found existing HTTPS proxy")
 	} else {
 		u.Update("Creating new HTTPS proxy...")
 		_, err := gc.Proxy.Create("https")
@@ -131,7 +130,7 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 	u.Update("Configuring forwarding rules...")
 
 	if gc.ForwardRule.Exists() {
-		u.Step("Found existing forwarding rule")
+		u.Step(terminal.StatusOK, "Found existing forwarding rule")
 	} else {
 		u.Update("Creating new forwarding rule...")
 		_, err := gc.ForwardRule.Create()
