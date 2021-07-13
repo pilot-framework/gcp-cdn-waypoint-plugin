@@ -14,6 +14,7 @@ type GCloud struct {
 	URLMap *URLMap
 	SSLCert *SSLCert
 	Proxy *Proxy
+	ForwardRule *ForwardRule
 }
 
 func Init(project, bucket string) *GCloud {
@@ -66,6 +67,8 @@ func (ip *IP) Exists() bool {
 		"addresses",
 		"describe",
 		ip.g.Bucket+"-ip",
+		"--global",
+		"--project="+ip.g.Project,
 	})
 
 	if err != nil {
@@ -83,6 +86,7 @@ func (b *BackendBucket) Create() (string, error) {
 	return b.g.Exec([]string{
 		"compute",
 		"backend-buckets",
+		"create",
 		b.g.Bucket+"-backend-bucket",
 		"--gcs-bucket-name="+b.g.Bucket,
 		"--enable-cdn",
@@ -146,7 +150,7 @@ func (p *Proxy) Create(which string) (string, error) {
 		"target-"+which+"-proxies",
 		"create", p.g.Bucket+"-lb-proxy",
 		"--url-map="+p.g.Bucket+"-lb",
-		"--ssl-certificate="+p.g.Bucket+"-cert",
+		"--ssl-certificates="+p.g.Bucket+"-cert",
 		"--project="+p.g.Project,
 	})
 }
