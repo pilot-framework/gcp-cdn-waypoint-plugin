@@ -35,7 +35,7 @@ func (rm *ReleaseManager) ConfigSet(config interface{}) error {
 
 	// validate the config
 	if rm.config.Domain == "" {
-		return fmt.Errorf("eomain is a required attribute")
+		return fmt.Errorf("domain is a required attribute")
 	}
 
 	return nil
