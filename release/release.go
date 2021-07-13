@@ -1,15 +1,17 @@
 package release
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
 
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
+	"github.com/pilot-framework/gcp-cdn-waypoint-plugin/platform"
 )
 
-type ReleaseConfig struct {
-	Active bool "hcl:directory,optional"
-}
+type ReleaseConfig struct{}
 
 type ReleaseManager struct {
 	config ReleaseConfig
@@ -66,10 +68,22 @@ func (rm *ReleaseManager) ReleaseFunc() interface{} {
 //
 // If an error is returned, Waypoint stops the execution flow and
 // returns an error to the user.
-func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI) (*Release, error) {
+func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *platform.Deployment) (*Release, error) {
 	u := ui.Status()
 	defer u.Close()
-	u.Update("Release application")
+	u.Step("", "---Releasing to Cloud CDN---")
 
 	return &Release{}, nil
+}
+
+func GetStaticIP(ipName string) (string, error) {
+	var stdout, stderr bytes.Buffer
+	cmd := exec.Command("gcloud", "compute", "addresses", "describe", ipName, "--format=get(address)", "--global")
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		return "", errors.New(string(bytes.TrimSpace(stderr.Bytes())))
+	}
+	return string(bytes.TrimSpace(stdout.Bytes())), nil
 }
