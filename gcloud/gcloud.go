@@ -78,6 +78,16 @@ func (ip *IP) Exists() bool {
 	}
 }
 
+func (ip *IP) Destroy() (string, error) {
+	return ip.g.Exec([]string{
+		"compute",
+		"addresses",
+		"delete",
+		ip.g.Bucket+"-ip",
+		"--global",
+	})
+}
+
 type BackendBucket struct {
 	g *GCloud
 }
@@ -109,6 +119,15 @@ func (b *BackendBucket) Exists() bool {
 	}
 }
 
+func (b *BackendBucket) Destroy() (string, error) {
+	return b.g.Exec([]string{
+		"compute",
+		"backend-buckets",
+		"delete",
+		b.g.Bucket+"-backend-bucket",
+	})
+}
+
 type URLMap struct {
 	g *GCloud
 }
@@ -137,6 +156,15 @@ func (u *URLMap) Exists() bool {
 	} else {
 		return true
 	}
+}
+
+func (u *URLMap) Destroy() (string, error) {
+	return u.g.Exec([]string{
+		"compute",
+		"url-maps",
+		"delete",
+		u.g.Bucket+"-lb",
+	})
 }
 
 type Proxy struct {
@@ -170,6 +198,15 @@ func (p *Proxy) Exists(which string) bool {
 	}
 }
 
+func (p *Proxy) Destroy(which string) (string, error) {
+	return p.g.Exec([]string{
+		"compute",
+		"target-"+which+"-proxies",
+		"delete",
+		p.g.Bucket+"-lb-proxy",
+	})
+}
+
 type ForwardRule struct {
 	g *GCloud
 }
@@ -194,6 +231,7 @@ func (f *ForwardRule) Exists() bool {
 		"forwarding-rules",
 		"describe",
 		f.g.Bucket+"-lb-forwarding-rule",
+		"--global",
 	})
 
 	if err != nil {
@@ -201,6 +239,16 @@ func (f *ForwardRule) Exists() bool {
 	} else {
 		return true
 	}
+}
+
+func (f *ForwardRule) Destroy() (string, error) {
+	return f.g.Exec([]string{
+		"compute",
+		"forwarding-rules",
+		"delete",
+		f.g.Bucket+"-lb-forwarding-rule",
+		"--global",
+	})
 }
 
 type SSLCert struct {
@@ -230,4 +278,13 @@ func (s *SSLCert) Exists() bool {
 	} else {
 		return true
 	}
+}
+
+func (s *SSLCert) Destroy() (string, error) {
+	return s.g.Exec([]string{
+		"compute",
+		"ssl-certificates",
+		"delete",
+		s.g.Bucket+"-cert",
+	})
 }
