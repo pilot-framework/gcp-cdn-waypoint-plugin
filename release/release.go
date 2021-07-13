@@ -30,12 +30,12 @@ func (rm *ReleaseManager) ConfigSet(config interface{}) error {
 	_, ok := config.(*ReleaseConfig)
 	if !ok {
 		// The Waypoint SDK should ensure this never gets hit
-		return fmt.Errorf("Expected *ReleaseConfig as parameter")
+		return fmt.Errorf("expected *ReleaseConfig as parameter")
 	}
 
 	// validate the config
 	if rm.config.Domain == "" {
-		return fmt.Errorf("Domain is a required attribute")
+		return fmt.Errorf("eomain is a required attribute")
 	}
 
 	return nil
