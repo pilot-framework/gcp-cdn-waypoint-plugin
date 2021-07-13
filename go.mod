@@ -7,6 +7,7 @@ require (
 	cloud.google.com/go/storage v1.10.0
 	github.com/hashicorp/waypoint-plugin-sdk v0.0.0-20210625180209-eda7ae600c2d
 	golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c // indirect
+	google.golang.org/api v0.50.0 // indirect
 	google.golang.org/genproto v0.0.0-20210701133433-6b8dcf568a95 // indirect
 	google.golang.org/protobuf v1.27.1
 )
