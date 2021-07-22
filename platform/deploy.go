@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
+	"strings"
 
 	"cloud.google.com/go/iam"
 	"cloud.google.com/go/storage"
@@ -70,21 +72,22 @@ func uploadFiles(
 	c context.Context,
 	client *storage.Client,
 	bucketName string,
+	buildDir string,
 	subPath string,
 	errors *[]string,
 ) []string {
-	files, err := os.ReadDir("./build/" + subPath)
+	files, err := os.ReadDir(path.Join(buildDir, subPath))
 	if err != nil {
 		*errors = append(*errors, err.Error())
 	}
 
 	for _, file := range files {
 		if file.IsDir() {
-			uploadFiles(c, client, bucketName, subPath+file.Name()+"/", errors)
+			uploadFiles(c, client, bucketName, buildDir, subPath+file.Name()+"/", errors)
 			continue
 		}
 
-		f, err := os.Open("./build/" + subPath + file.Name())
+		f, err := os.Open(path.Join(buildDir, subPath, file.Name()))
 		if err != nil {
 			*errors = append(*errors, err.Error())
 			continue
@@ -113,6 +116,7 @@ type DeployConfig struct {
 	Directory    string `hcl:"directory,optional"`
 	IndexPage    string `hcl:"index,optional"`
 	NotFoundPage string `hcl:"not_found,optional"`
+	BaseDir      string `hcl:"base,optional"`
 }
 
 type Platform struct {
@@ -141,12 +145,31 @@ func (p *Platform) ConfigSet(config interface{}) error {
 		return fmt.Errorf("Bucket is a required attribute")
 	}
 
-	if c.Directory != "" {
-		_, err := os.Stat(c.Directory)
+	tmpFiles, err := os.ReadDir("/tmp")
+	if err != nil {
+		return fmt.Errorf("Error accessing tmp directory")
+	}
 
-		if err != nil {
-			return fmt.Errorf("Directory you specified does not exist")
+	tmpDir := ""
+
+	for _, file := range tmpFiles {
+		if file.IsDir() && strings.Contains(file.Name(), "waypoint") {
+			tmpDir = file.Name()
+			break
 		}
+	}
+
+	if tmpDir == "" {
+		return fmt.Errorf("Could not find tmp directory for this project")
+	}
+
+	c.BaseDir = path.Join("/tmp", tmpDir)
+	c.Directory = path.Join(c.BaseDir, strings.TrimLeft(c.Directory, "./"))
+
+	_, err = os.Stat(c.Directory)
+
+	if err != nil {
+		return fmt.Errorf("Directory you specified does not exist")
 	}
 
 	return nil
@@ -244,7 +267,7 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 	u.Update("Uploading static files...")
 
 	fileErrors := []string{}
-	uploadFiles(ctx, client, p.config.Bucket, "", &fileErrors)
+	uploadFiles(ctx, client, p.config.Bucket, p.config.Directory, "", &fileErrors)
 
 	if len(fileErrors) > 0 {
 		u.Step(terminal.StatusWarn, "Some static files failed to upload")
