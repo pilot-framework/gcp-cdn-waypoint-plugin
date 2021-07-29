@@ -208,7 +208,7 @@ func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, err
 
 	attrs, err := bkt.Attrs(ctx)
 	// if this errors out, bucket doesn't exist
-	if err != nil {
+	if err != nil && !strings.Contains(err.Error(), "You already own this bucket") {
 		u.Update(fmt.Sprintf("Bucket %s not found, creating new one...", p.config.Bucket))
 
 		if err := bkt.Create(ctx, p.config.Project,
