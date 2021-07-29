@@ -67,7 +67,6 @@ func areObjectsPublic(
 	return false, nil
 }
 
-// TODO: handle dynamic build paths
 func uploadFiles(
 	c context.Context,
 	client *storage.Client,
