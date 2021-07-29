@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/pilot-framework/gcp-cdn-waypoint-plugin/gcloud"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
+	"github.com/pilot-framework/gcp-cdn-waypoint-plugin/gcloud"
 	"github.com/pilot-framework/gcp-cdn-waypoint-plugin/platform"
 )
 
@@ -141,5 +141,8 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 		u.Step(terminal.StatusOK, "Created new forwarding rule")
 	}
 
-	return &Release{}, nil
+	return &Release{
+		Project: target.Project,
+		Bucket:  target.Bucket,
+	}, nil
 }
