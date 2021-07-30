@@ -10,6 +10,7 @@ import (
 
 	"cloud.google.com/go/iam"
 	"cloud.google.com/go/storage"
+	"github.com/gabriel-vasile/mimetype"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
 	iampb "google.golang.org/genproto/googleapis/iam/v1"
 )
@@ -67,6 +68,18 @@ func areObjectsPublic(
 	return false, nil
 }
 
+func detectMimeType(fname string, buffer []byte) string {
+	if strings.HasSuffix(fname, ".css") {
+		return "text/css"
+	} else if strings.HasSuffix(fname, ".js") {
+		return "application/javascript"
+	} else if strings.HasSuffix(fname, ".map") {
+		return "binary/octet-stream"
+	}
+
+	return mimetype.Detect(buffer).String()
+}
+
 func uploadFiles(
 	c context.Context,
 	client *storage.Client,
@@ -103,6 +116,20 @@ func uploadFiles(
 			*errors = append(*errors, err.Error())
 			continue
 		}
+
+		fileInfo, _ := f.Stat()
+		size := fileInfo.Size()
+		buffer := make([]byte, size)
+
+		objectMetadata := storage.ObjectAttrsToUpdate{
+			Metadata: map[string]string{
+				"ContentType": detectMimeType(fileInfo.Name(), buffer),
+			},
+		}
+
+		if _, err := client.Bucket(bucketName).Object(subPath+file.Name()).Update(c, objectMetadata); err != nil {
+			*errors = append(*errors, err.Error())
+		}
 	}
 
 	return *errors
@@ -132,21 +159,21 @@ func (p *Platform) ConfigSet(config interface{}) error {
 	c, ok := config.(*DeployConfig)
 	if !ok {
 		// The Waypoint SDK should ensure this never gets hit
-		return fmt.Errorf("Expected *DeployConfig as parameter")
+		return fmt.Errorf("expected *DeployConfig as parameter")
 	}
 
 	// validate the config
 	if c.Region == "" {
-		return fmt.Errorf("Region must be set to a valid GCP region")
+		return fmt.Errorf("region must be set to a valid GCP region")
 	}
 
 	if c.Bucket == "" {
-		return fmt.Errorf("Bucket is a required attribute")
+		return fmt.Errorf("bucket is a required attribute")
 	}
 
 	tmpFiles, err := os.ReadDir("/tmp")
 	if err != nil {
-		return fmt.Errorf("Error accessing tmp directory")
+		return fmt.Errorf("error accessing tmp directory")
 	}
 
 	tmpDir := ""
@@ -159,7 +186,7 @@ func (p *Platform) ConfigSet(config interface{}) error {
 	}
 
 	if tmpDir == "" {
-		return fmt.Errorf("Could not find tmp directory for this project")
+		return fmt.Errorf("could not find tmp directory for this project")
 	}
 
 	c.BaseDir = path.Join("/tmp", tmpDir)
@@ -168,7 +195,7 @@ func (p *Platform) ConfigSet(config interface{}) error {
 	_, err = os.Stat(c.Directory)
 
 	if err != nil {
-		return fmt.Errorf("Directory you specified does not exist")
+		return fmt.Errorf("directory you specified does not exist")
 	}
 
 	return nil
