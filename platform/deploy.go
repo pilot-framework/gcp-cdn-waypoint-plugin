@@ -11,6 +11,7 @@ import (
 	"cloud.google.com/go/iam"
 	"cloud.google.com/go/storage"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
+	"google.golang.org/api/iterator"
 	iampb "google.golang.org/genproto/googleapis/iam/v1"
 )
 
@@ -145,6 +146,63 @@ type Platform struct {
 	config DeployConfig
 }
 
+// Implement the Destroyer interface
+func (p *Platform) DestroyFunc() interface{} {
+	return p.Destroy
+}
+
+// If an error is returned, Waypoint stops the execution flow and
+// returns an error to the user.
+func (p *Platform) Destroy(ctx context.Context, ui terminal.UI) error {
+	u := ui.Status()
+	defer u.Close()
+	u.Step("", "---Destroying Cloud Storage Assets---")
+
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Google Cloud: %s", err.Error())
+	}
+	defer client.Close()
+
+	u.Update("Destroying objects...")
+
+	// If a bucket already doesn't exist, just short circuit
+	_, err = client.Bucket(p.config.Bucket).Attrs(ctx)
+	if err == storage.ErrBucketNotExist {
+		u.Step(terminal.StatusOK, "Successfully destroyed Cloud Storage Assets")
+		return nil
+	}
+
+	it := client.Bucket(p.config.Bucket).Objects(ctx, nil)
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed to list object: %s", err.Error())
+		}
+
+		obj := client.Bucket(p.config.Bucket).Object(attrs.Name)
+		if err := obj.Delete(ctx); err != nil {
+			return fmt.Errorf("failed to destroy object: %s", err.Error())
+		}
+	}
+
+	u.Step("", "Destroyed objects")
+
+	u.Update("Destroying bucket...")
+
+	bkt := client.Bucket(p.config.Bucket)
+	if err := bkt.Delete(ctx); err != nil {
+		return fmt.Errorf("failed to destroy bucket: %s", err.Error())
+	}
+
+	u.Step(terminal.StatusOK, "Successfully destroyed Cloud Storage Assets")
+
+	return nil
+}
+
 // Implement Configurable
 func (p *Platform) Config() (interface{}, error) {
 	return &p.config, nil
@@ -188,11 +246,12 @@ func (p *Platform) ConfigSet(config interface{}) error {
 	c.BaseDir = path.Join("/tmp", tmpDir)
 	c.Directory = path.Join(c.BaseDir, strings.TrimLeft(c.Directory, "./"))
 
-	_, err = os.Stat(c.Directory)
+	// TODO: find graceful way to detect if destroying and prevent this error
+	// _, err = os.Stat(c.Directory)
 
-	if err != nil {
-		return fmt.Errorf("directory you specified does not exist")
-	}
+	// if err != nil {
+	// 	return fmt.Errorf("directory you specified does not exist")
+	// }
 
 	return nil
 }
@@ -200,12 +259,12 @@ func (p *Platform) ConfigSet(config interface{}) error {
 // Implement Builder
 func (p *Platform) DeployFunc() interface{} {
 	// return a function which will be called by Waypoint
-	return p.deploy
+	return p.Deploy
 }
 
 // If an error is returned, Waypoint stops the execution flow and
 // returns an error to the user.
-func (p *Platform) deploy(ctx context.Context, ui terminal.UI) (*Deployment, error) {
+func (p *Platform) Deploy(ctx context.Context, ui terminal.UI) (*Deployment, error) {
 	u := ui.Status()
 	defer u.Close()
 	u.Step("", "---Deploying Cloud Storage Assets---")
