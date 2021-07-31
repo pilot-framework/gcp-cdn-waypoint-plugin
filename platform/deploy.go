@@ -122,9 +122,7 @@ func uploadFiles(
 		buffer := make([]byte, size)
 
 		objectMetadata := storage.ObjectAttrsToUpdate{
-			Metadata: map[string]string{
-				"Content-Type": detectMimeType(fileInfo.Name(), buffer),
-			},
+			ContentType: detectMimeType(fileInfo.Name(), buffer),
 		}
 
 		if _, err := client.Bucket(bucketName).Object(subPath+file.Name()).Update(c, objectMetadata); err != nil {
