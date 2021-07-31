@@ -75,6 +75,8 @@ func detectMimeType(fname string) string {
 		return "application/javascript"
 	} else if strings.HasSuffix(fname, ".map") {
 		return "binary/octet-stream"
+	} else if strings.HasSuffix(fname, ".svg") {
+		return "image/svg+xml"
 	}
 
 	return ""
