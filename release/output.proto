@@ -8,6 +8,7 @@ option go_package = "github.com/pilot-framework/gcp-cdn-waypoint-plugin/release"
 // You can customise this message to change the fields for
 // the output value from your ReleaseManager
 message Release {
-  string project = 1;
-  string bucket = 2;
+  string url = 1;
+  string project = 2;
+  string bucket = 3;
 }

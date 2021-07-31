@@ -4,10 +4,15 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hashicorp/waypoint-plugin-sdk/component"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
 	"github.com/pilot-framework/gcp-cdn-waypoint-plugin/gcloud"
 	"github.com/pilot-framework/gcp-cdn-waypoint-plugin/platform"
 )
+
+func (r *Release) URL() string { return r.Url }
+
+var _ component.Release = (*Release)(nil)
 
 type ReleaseConfig struct {
 	Domain string `hcl:"domain"`
@@ -19,12 +24,12 @@ type ReleaseManager struct {
 
 // Implement the Destroyer interface
 func (rm *ReleaseManager) DestroyFunc() interface{} {
-	return rm.destroy
+	return rm.Destroy
 }
 
 // If an error is returned, Waypoint stops the execution flow and
 // returns an error to the user.
-func (rm *ReleaseManager) destroy(ctx context.Context, ui terminal.UI, release *Release) error {
+func (rm *ReleaseManager) Destroy(ctx context.Context, ui terminal.UI, release *Release) error {
 	u := ui.Status()
 	defer u.Close()
 	u.Step("", "---Destroying Cloud CDN resources---")
@@ -130,12 +135,18 @@ func (rm *ReleaseManager) ConfigSet(config interface{}) error {
 // Implement Builder
 func (rm *ReleaseManager) ReleaseFunc() interface{} {
 	// return a function which will be called by Waypoint
-	return rm.release
+	return rm.Release
 }
 
-func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *platform.Deployment) (*Release, error) {
+func (rm *ReleaseManager) Release(ctx context.Context, ui terminal.UI, target *platform.Deployment) (*Release, error) {
 	u := ui.Status()
 	defer u.Close()
+
+	if target == nil || target.Project == "" || target.Bucket == "" {
+		u.Step(terminal.StatusError, "Did not receive deployment information from Platform phase")
+		return nil, fmt.Errorf("aborting release phase")
+	}
+
 	u.Step("", "---Releasing to Cloud CDN---")
 
 	gc := gcloud.Init(target.Project, target.Bucket)
@@ -231,6 +242,7 @@ func (rm *ReleaseManager) release(ctx context.Context, ui terminal.UI, target *p
 	}
 
 	return &Release{
+		Url:     "https://" + rm.config.Domain,
 		Project: target.Project,
 		Bucket:  target.Bucket,
 	}, nil
