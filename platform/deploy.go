@@ -123,7 +123,7 @@ func uploadFiles(
 
 		objectMetadata := storage.ObjectAttrsToUpdate{
 			Metadata: map[string]string{
-				"ContentType": detectMimeType(fileInfo.Name(), buffer),
+				"Content-Type": detectMimeType(fileInfo.Name(), buffer),
 			},
 		}
 
