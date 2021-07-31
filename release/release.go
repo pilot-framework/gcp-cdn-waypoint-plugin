@@ -241,6 +241,8 @@ func (rm *ReleaseManager) Release(ctx context.Context, ui terminal.UI, target *p
 		u.Step(terminal.StatusOK, "Created new forwarding rule")
 	}
 
+	u.Step("", "Please allow at least 30 minutes for SSL certificate to be fully provisioned - don't forget to set up your DNS too!")
+
 	return &Release{
 		Url:     "https://" + rm.config.Domain,
 		Project: target.Project,
