@@ -10,7 +10,6 @@ import (
 
 	"cloud.google.com/go/iam"
 	"cloud.google.com/go/storage"
-	"github.com/gabriel-vasile/mimetype"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
 	iampb "google.golang.org/genproto/googleapis/iam/v1"
 )
@@ -68,7 +67,7 @@ func areObjectsPublic(
 	return false, nil
 }
 
-func detectMimeType(fname string, buffer []byte) string {
+func detectMimeType(fname string) string {
 	if strings.HasSuffix(fname, ".css") {
 		return "text/css"
 	} else if strings.HasSuffix(fname, ".js") {
@@ -77,7 +76,7 @@ func detectMimeType(fname string, buffer []byte) string {
 		return "binary/octet-stream"
 	}
 
-	return mimetype.Detect(buffer).String()
+	return ""
 }
 
 func uploadFiles(
@@ -116,17 +115,16 @@ func uploadFiles(
 			*errors = append(*errors, err.Error())
 			continue
 		}
+		cType := detectMimeType(file.Name())
 
-		fileInfo, _ := f.Stat()
-		size := fileInfo.Size()
-		buffer := make([]byte, size)
+		if cType != "" {
+			objectMetadata := storage.ObjectAttrsToUpdate{
+				ContentType: detectMimeType(file.Name()),
+			}
 
-		objectMetadata := storage.ObjectAttrsToUpdate{
-			ContentType: detectMimeType(fileInfo.Name(), buffer),
-		}
-
-		if _, err := client.Bucket(bucketName).Object(subPath+file.Name()).Update(c, objectMetadata); err != nil {
-			*errors = append(*errors, err.Error())
+			if _, err := client.Bucket(bucketName).Object(subPath+file.Name()).Update(c, objectMetadata); err != nil {
+				*errors = append(*errors, err.Error())
+			}
 		}
 	}
 
