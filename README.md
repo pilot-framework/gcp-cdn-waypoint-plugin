@@ -1,17 +1,10 @@
-# Waypoint Plugin Template
+# GCP Cloud CDN Waypoint Plugin
 
-This folder contains an example plugin structure which can be used when building your own plugins.
+This is a Deploy/Release Waypoint Plugin that provisions the necessary resources to deploy static files on GCP Cloud Storage and Cloud CDN. Requires a build directory of static files within a project. Should be used with Pilot or a remote Waypoint configuration.
 
 ## Steps
 
-1. To scaffold a new plugin use the `./clone.sh` script passing the destination folder and the Go package
-for your new plugin as parameters
-
-```shell
-./clone.sh myplugin ../destination_folder github.com/myorg/mypackage
-```
-
-2. You can then run the Makefile to compile the new plugin, the `Makefile` will build the plugin for all architectures.
+You can run the Makefile to compile the plugin, the `Makefile` will build the plugin for all architectures.
 
 ```shell
 cd ../destination_folder
@@ -21,18 +14,16 @@ make
 
 ```shell
 Build Protos
-protoc -I . --go_out=plugins=grpc:. --go_opt=paths=source_relative ./builder/output.proto
-protoc -I . --go_out=plugins=grpc:. --go_opt=paths=source_relative ./registry/output.proto
 protoc -I . --go_out=plugins=grpc:. --go_opt=paths=source_relative ./platform/output.proto
 protoc -I . --go_out=plugins=grpc:. --go_opt=paths=source_relative ./release/output.proto
 
 Compile Plugin
 # Clear the output
 rm -rf ./bin
-GOOS=linux GOARCH=amd64 go build -o ./bin/linux_amd64/waypoint-plugin-mytest ./main.go 
-GOOS=darwin GOARCH=amd64 go build -o ./bin/darwin_amd64/waypoint-plugin-mytest ./main.go 
-GOOS=windows GOARCH=amd64 go build -o ./bin/windows_amd64/waypoint-plugin-mytest.exe ./main.go 
-GOOS=windows GOARCH=386 go build -o ./bin/windows_386/waypoint-plugin-mytest.exe ./main.go 
+GOOS=linux GOARCH=amd64 go build -o ./bin/linux_amd64/waypoint-plugin-pilot-cloud-cdn ./main.go 
+GOOS=darwin GOARCH=amd64 go build -o ./bin/darwin_amd64/waypoint-plugin-pilot-cloud-cdn ./main.go 
+GOOS=windows GOARCH=amd64 go build -o ./bin/windows_amd64/waypoint-plugin-pilot-cloud-cdn.exe ./main.go 
+GOOS=windows GOARCH=386 go build -o ./bin/windows_386/waypoint-plugin-pilot-cloud-cdn.exe ./main.go 
 ```
 
 ## Building with Docker
@@ -61,15 +52,3 @@ DOCKER_BUILDKIT=1 docker build --output releases --progress=plain .
 #15 copying files 36.45MB 0.1s done
 #15 DONE 0.1s
 ```
-
-## Building and releasing with GitHub Actions
-
-When cloning the template a default GitHub Action is created at the path `.github/workflows/build-plugin.yaml`. You can use this action to automatically build and release your plugin.
-
-The action has two main phases:
-1. **Build** - This phase builds the plugin binaries for all the supported architectures. It is triggered when pushing
-   to a branch or on pull requests.
-1. **Release** - This phase creates a new GitHub release containing the built plugin. It is triggered when pushing tags
-   which starting with `v`, for example `v0.1.0`.
-
-You can enable this action by clicking on the `Actions` tab in your GitHub repository and enabling GitHub Actions.
